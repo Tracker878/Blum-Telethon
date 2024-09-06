@@ -1,10 +1,11 @@
-import os
+from os.path import basename, splitext, join
 import glob
 import asyncio
 import argparse
 from itertools import cycle
 
-from pyrogram import Client
+from opentele.tl import TelegramClient
+from opentele.api import API
 from better_proxy import Proxy
 
 from bot.config import settings
@@ -32,7 +33,7 @@ global tg_clients
 def get_session_names() -> list[str]:
     session_names = sorted(glob.glob("sessions/*.session"))
     session_names = [
-        os.path.splitext(os.path.basename(file))[0] for file in session_names
+        splitext(basename(file))[0] for file in session_names
     ]
 
     return session_names
@@ -48,7 +49,7 @@ def get_proxies() -> list[Proxy]:
     return proxies
 
 
-async def get_tg_clients() -> list[Client]:
+async def get_tg_clients() -> list[TelegramClient]:
     global tg_clients
 
     session_names = get_session_names()
@@ -60,12 +61,14 @@ async def get_tg_clients() -> list[Client]:
         raise ValueError("API_ID and API_HASH not found in the .env file.")
 
     tg_clients = [
-        Client(
-            name=session_name,
+        TelegramClient(
+            name=join(settings.PROJECT_ROOT, "sessions", session_name),
             api_id=settings.API_ID,
             api_hash=settings.API_HASH,
-            workdir="sessions/",
-            plugins=dict(root="bot/plugins"),
+        ) if settings.API_ID and settings.API_HASH else
+        TelegramClient(
+            name=join(settings.PROJECT_ROOT, "sessions", session_name),
+            api=API.TelegramAndroid.Generate(unique_id=session_name),
         )
         for session_name in session_names
     ]
@@ -85,7 +88,7 @@ async def process() -> None:
         print(start_text)
 
         while True:
-            action = input("> ")
+            action = input("> ").strip()
 
             if not action.isdigit():
                 logger.warning("Action must be number")
@@ -104,9 +107,7 @@ async def process() -> None:
         await register_sessions()
 
 
-
-
-async def run_tasks(tg_clients: list[Client]):
+async def run_tasks(tg_clients: list[TelegramClient]):
     proxies = get_proxies()
     proxies_cycle = cycle(proxies) if proxies else None
     tasks = [
