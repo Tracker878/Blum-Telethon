@@ -6,8 +6,8 @@ import __main__ as main
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 
-    API_ID: int
-    API_HASH: str
+    API_ID: int | None = None
+    API_HASH: str | None = None
 
     PLAY_GAMES: bool = True
     POINTS: list[int] = [190, 230]

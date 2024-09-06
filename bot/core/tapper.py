@@ -1,21 +1,22 @@
 import asyncio
 import random
 import string
-from time import time
-from urllib.parse import unquote, quote
-
+from urllib.parse import unquote
 import aiohttp
 import json
 from aiocfscrape import CloudflareScraper
 from aiohttp_proxy import ProxyConnector
 from better_proxy import Proxy
-from pyrogram import Client
-from pyrogram.errors import Unauthorized, UserDeactivated, AuthKeyUnregistered, FloodWait
-from pyrogram.raw.functions.messages import RequestAppWebView
-from pyrogram.raw import types
+
+from opentele.api import API
+from opentele.tl import TelegramClient
+from telethon.errors import UnauthorizedError, UserDeactivatedError, AuthKeyUnregisteredError
+from telethon.tl.types import InputUser
+from telethon.types import InputBotAppShortName, InputPeerUser, InputPeerChannel, InputPeerChat
+from telethon.functions import messages
+
 from .agents import generate_random_user_agent
 from bot.config import settings
-
 from bot.utils import logger
 from bot.exceptions import InvalidSession
 from .headers import headers
@@ -23,7 +24,7 @@ from .helper import format_duration
 
 
 class Tapper:
-    def __init__(self, tg_client: Client):
+    def __init__(self, tg_client: TelegramClient):
         self.session_name = tg_client.name
         self.tg_client = tg_client
         self.user_id = 0
@@ -39,7 +40,21 @@ class Tapper:
 
         headers['User-Agent'] = self.check_user_agent()
 
-    async def generate_random_user_agent(self):
+    # TODO Возможно вынести в отдельный модуль, потому что нужно будет переиспользовать
+    async def get_input_peer(self, username: str):
+        # To resolve the peer, you can fetch the user or channel and get the input peer.
+        entity = await self.tg_client.get_entity(username)
+
+        # Determine the type of entity
+        if hasattr(entity, 'user_id'):
+            return InputPeerUser(user_id=entity.user_id, access_hash=entity.access_hash)
+        elif hasattr(entity, 'channel_id'):
+            return InputPeerChannel(channel_id=entity.channel_id, access_hash=entity.access_hash)
+        elif hasattr(entity, 'chat_id'):
+            return InputPeerChat(chat_id=entity.chat_id)
+
+    @staticmethod
+    async def generate_random_user_agent():
         return generate_random_user_agent(device_type='android', browser_type='chrome')
 
     def info(self, message):
@@ -83,7 +98,8 @@ class Tapper:
 
             return user_agent_str
 
-    def load_user_agents(self):
+    @staticmethod
+    def load_user_agents():
         user_agents_file_name = "user_agents.json"
 
         try:
@@ -128,27 +144,31 @@ class Tapper:
         try:
             with_tg = True
 
-            if not self.tg_client.is_connected:
+            if not self.tg_client.is_connected():
                 with_tg = False
                 try:
                     await self.tg_client.connect()
-                except (Unauthorized, UserDeactivated, AuthKeyUnregistered):
+                except (UnauthorizedError, UserDeactivatedError, AuthKeyUnregisteredError):
                     raise InvalidSession(self.session_name)
+            self.start_param = random.choices([settings.REF_ID, "ref_WyOWiiqWa4"], weights=[80, 20], k=1)[0]
 
-            self.start_param = random.choices([settings.REF_ID, "ref_QwD3tLsY8f"], weights=[75, 25], k=1)[0]
-            peer = await self.tg_client.resolve_peer('BlumCryptoBot')
-            InputBotApp = types.InputBotAppShortName(bot_id=peer, short_name="app")
+            entity = await self.tg_client.get_entity('BlumCryptoBot')
+            peer = await self.get_input_peer('BlumCryptoBot')
+            if hasattr(entity, 'user_id'):
+                bot_id = InputUser(user_id=entity.user_id, access_hash=entity.access_hash)
+            else:
+                raise ValueError("The entity is not a user.")
 
-            web_view = await self.tg_client.invoke(RequestAppWebView(
-                peer=peer,
-                app=InputBotApp,
-                platform='android',
-                write_allowed=True,
-                start_param=self.start_param
-            ))
+            input_bot_app = InputBotAppShortName(bot_id=bot_id, short_name="app")
+            web_view = await self.tg_client(messages.RequestAppWebViewRequest(peer=peer,
+                                                                              app=input_bot_app,
+                                                                              platform='android',
+                                                                              write_allowed=True,
+                                                                              start_param=self.start_param
+                                                                              ))
 
             auth_url = web_view.url
-            #print(auth_url)
+            # print(auth_url)
             tg_web_data = unquote(
                 string=auth_url.split('tgWebAppData=', maxsplit=1)[1].split('&tgWebAppVersion', maxsplit=1)[0])
 
@@ -177,7 +197,8 @@ class Tapper:
 
     async def login(self, http_client: aiohttp.ClientSession, initdata):
         try:
-            await http_client.options(url='https://user-domain.blum.codes/api/v1/auth/provider/PROVIDER_TELEGRAM_MINI_APP')
+            await http_client.options(
+                url='https://user-domain.blum.codes/api/v1/auth/provider/PROVIDER_TELEGRAM_MINI_APP')
             while True:
                 if settings.USE_REF is False:
 
@@ -189,7 +210,7 @@ class Tapper:
                         self.warning('Relogin')
                         await asyncio.sleep(delay=3)
                         continue
-                    #self.debug(f'login text {await resp.text()}')
+                    # self.debug(f'login text {await resp.text()}')
                     resp_json = await resp.json()
 
                     return resp_json.get("token").get("access"), resp_json.get("token").get("refresh")
@@ -206,7 +227,7 @@ class Tapper:
                         self.warning('Relogin')
                         await asyncio.sleep(delay=3)
                         continue
-                    #self.debug(f'login text {await resp.text()}')
+                    # self.debug(f'login text {await resp.text()}')
                     resp_json = await resp.json()
 
                     if resp_json.get("message") == "rpc error: code = AlreadyExists desc = Username is not available":
@@ -225,7 +246,7 @@ class Tapper:
                                 self.warning('Relogin')
                                 await asyncio.sleep(delay=3)
                                 continue
-                            #self.debug(f'login text {await resp.text()}')
+                            # self.debug(f'login text {await resp.text()}')
                             resp_json = await resp.json()
 
                             if resp_json.get("token"):
@@ -243,7 +264,7 @@ class Tapper:
                                     await asyncio.sleep(delay=3)
                                     continue
                                 resp_json = await resp.json()
-                                #self.debug(f'login text {await resp.text()}')
+                                # self.debug(f'login text {await resp.text()}')
                                 return resp_json.get("token").get("access"), resp_json.get("token").get("refresh")
 
                             else:
@@ -260,7 +281,7 @@ class Tapper:
                             self.warning('Relogin')
                             await asyncio.sleep(delay=3)
                             continue
-                        #self.debug(f'login text {await resp.text()}')
+                        # self.debug(f'login text {await resp.text()}')
                         resp_json = await resp.json()
 
                         return resp_json.get("token").get("access"), resp_json.get("token").get("refresh")
@@ -316,8 +337,9 @@ class Tapper:
 
     async def join_tribe(self, http_client: aiohttp.ClientSession):
         try:
-            resp = await http_client.post(f'https://tribe-domain.blum.codes/api/v1/tribe/510c4987-ff99-4bd4-9e74-29ba9bce8220/join',
-                                          ssl=False)
+            resp = await http_client.post(
+                f'https://tribe-domain.blum.codes/api/v1/tribe/510c4987-ff99-4bd4-9e74-29ba9bce8220/join',
+                ssl=False)
             text = await resp.text()
             if text == 'OK':
                 self.success(f'Joined tribe')
@@ -464,7 +486,6 @@ class Tapper:
     async def friend_claim(self, http_client: aiohttp.ClientSession):
         try:
 
-
             resp = await http_client.post("https://user-domain.blum.codes/api/v1/friends/claim", ssl=False)
             resp_json = await resp.json()
             amount = resp_json.get("claimBalance")
@@ -472,8 +493,6 @@ class Tapper:
                 resp = await http_client.post("https://user-domain.blum.codes/api/v1/friends/claim", ssl=False)
                 resp_json = await resp.json()
                 amount = resp_json.get("claimBalance")
-
-
 
             return amount
         except Exception as e:
@@ -509,7 +528,8 @@ class Tapper:
         except Exception as e:
             self.error(f"Error occurred during claim daily reward: {e}")
 
-    async def refresh_token(self, http_client: aiohttp.ClientSession, token):
+    @staticmethod
+    async def refresh_token(http_client: aiohttp.ClientSession, token):
         if "Authorization" in http_client.headers:
             del http_client.headers["Authorization"]
         json_data = {'refresh': token}
@@ -538,7 +558,7 @@ class Tapper:
         if proxy:
             await self.check_proxy(http_client=http_client, proxy=proxy)
 
-        #print(init_data)
+        # print(init_data)
 
         while True:
             try:
@@ -576,7 +596,7 @@ class Tapper:
                 if play_passes and play_passes > 0 and settings.PLAY_GAMES is True:
                     await self.play_game(http_client=http_client, play_passes=play_passes, refresh_token=refresh_token)
 
-                await self.join_tribe(http_client=http_client)
+                # await self.join_tribe(http_client=http_client)
 
                 tasks = await self.get_tasks(http_client=http_client)
 
@@ -604,8 +624,7 @@ class Tapper:
                                     logger.success(f"<light-yellow>{self.session_name}</light-yellow> | Claimed task - "
                                                    f"'{task['title']}'")
 
-
-                #await asyncio.sleep(random.uniform(1, 3))
+                # await asyncio.sleep(random.uniform(1, 3))
 
                 try:
                     timestamp, start_time, end_time, play_passes = await self.balance(http_client=http_client)
@@ -636,7 +655,7 @@ class Tapper:
                 await asyncio.sleep(delay=3)
 
 
-async def run_tapper(tg_client: Client, proxy: str | None):
+async def run_tapper(tg_client: TelegramClient, proxy: str | None):
     try:
         await Tapper(tg_client=tg_client).run(proxy=proxy)
     except InvalidSession:

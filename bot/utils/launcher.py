@@ -1,4 +1,4 @@
-from os.path import basename, splitext, join
+from os import path, mkdir
 import glob
 import asyncio
 import argparse
@@ -33,7 +33,7 @@ global tg_clients
 def get_session_names() -> list[str]:
     session_names = sorted(glob.glob("sessions/*.session"))
     session_names = [
-        splitext(basename(file))[0] for file in session_names
+        path.splitext(path.basename(file))[0] for file in session_names
     ]
 
     return session_names
@@ -62,12 +62,12 @@ async def get_tg_clients() -> list[TelegramClient]:
 
     tg_clients = [
         TelegramClient(
-            name=join(settings.PROJECT_ROOT, "sessions", session_name),
+            name=path.join(settings.PROJECT_ROOT, "sessions", session_name),
             api_id=settings.API_ID,
             api_hash=settings.API_HASH,
         ) if settings.API_ID and settings.API_HASH else
         TelegramClient(
-            name=join(settings.PROJECT_ROOT, "sessions", session_name),
+            name=path.join(settings.PROJECT_ROOT, "sessions", session_name),
             api=API.TelegramAndroid.Generate(unique_id=session_name),
         )
         for session_name in session_names
