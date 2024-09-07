@@ -8,16 +8,14 @@ from aiocfscrape import CloudflareScraper
 from aiohttp_proxy import ProxyConnector
 from better_proxy import Proxy
 
-from opentele.api import API
-from opentele.tl import TelegramClient
-from telethon.errors import UnauthorizedError, UserDeactivatedError, AuthKeyUnregisteredError
-from telethon.tl.types import InputUser
-from telethon.types import InputBotAppShortName, InputPeerUser, InputPeerChannel, InputPeerChat
-from telethon.functions import messages
+from telethon import TelegramClient
+from telethon.errors import UnauthorizedError, UserDeactivatedError, AuthKeyUnregisteredError, UserDeactivatedBanError, PhoneNumberBannedError
+from telethon.types import InputUser, InputBotAppShortName, InputPeerUser
+from telethon.functions import messages, contacts
 
 from .agents import generate_random_user_agent
 from bot.config import settings
-from bot.utils import logger
+from bot.utils import logger, proxy_utils
 from bot.exceptions import InvalidSession
 from .headers import headers
 from .helper import format_duration
@@ -25,7 +23,7 @@ from .helper import format_duration
 
 class Tapper:
     def __init__(self, tg_client: TelegramClient):
-        self.session_name = tg_client.name
+        self.session_name = tg_client.session.filename.split('/')[-1].replace(r'.session', '')
         self.tg_client = tg_client
         self.user_id = 0
         self.username = None
@@ -39,19 +37,6 @@ class Tapper:
         self.session_ug_dict = self.load_user_agents() or []
 
         headers['User-Agent'] = self.check_user_agent()
-
-    # TODO Возможно вынести в отдельный модуль, потому что нужно будет переиспользовать
-    async def get_input_peer(self, username: str):
-        # To resolve the peer, you can fetch the user or channel and get the input peer.
-        entity = await self.tg_client.get_entity(username)
-
-        # Determine the type of entity
-        if hasattr(entity, 'user_id'):
-            return InputPeerUser(user_id=entity.user_id, access_hash=entity.access_hash)
-        elif hasattr(entity, 'channel_id'):
-            return InputPeerChannel(channel_id=entity.channel_id, access_hash=entity.access_hash)
-        elif hasattr(entity, 'chat_id'):
-            return InputPeerChat(chat_id=entity.chat_id)
 
     @staticmethod
     async def generate_random_user_agent():
@@ -129,46 +114,35 @@ class Tapper:
     async def get_tg_web_data(self, proxy: str | None) -> str:
         if proxy:
             proxy = Proxy.from_str(proxy)
-            proxy_dict = dict(
-                scheme=proxy.protocol,
-                hostname=proxy.host,
-                port=proxy.port,
-                username=proxy.login,
-                password=proxy.password
-            )
+            proxy_dict = proxy_utils.to_telethon_proxy(proxy)
         else:
             proxy_dict = None
-
-        self.tg_client.proxy = proxy_dict
-
+        self.tg_client.set_proxy(proxy_dict)
         try:
             with_tg = True
-
             if not self.tg_client.is_connected():
                 with_tg = False
                 try:
-                    await self.tg_client.connect()
-                except (UnauthorizedError, UserDeactivatedError, AuthKeyUnregisteredError):
+                    await self.tg_client.start()
+                except (UnauthorizedError, AuthKeyUnregisteredError):
                     raise InvalidSession(self.session_name)
-            self.start_param = random.choices([settings.REF_ID, "ref_WyOWiiqWa4"], weights=[80, 20], k=1)[0]
+                except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
+                    raise InvalidSession(f"{self.session_name}: User is banned")
+            self.start_param = settings.REF_ID if random.randint(0,100) <= 85 else "ref_WyOWiiqWa4"
+            resolve_result = await self.tg_client(contacts.ResolveUsernameRequest(username='BlumCryptoBot'))
+            peer = InputPeerUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
+            input_user = InputUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
+            input_bot_app = InputBotAppShortName(bot_id=input_user, short_name="app")
 
-            entity = await self.tg_client.get_entity('BlumCryptoBot')
-            peer = await self.get_input_peer('BlumCryptoBot')
-            if hasattr(entity, 'user_id'):
-                bot_id = InputUser(user_id=entity.user_id, access_hash=entity.access_hash)
-            else:
-                raise ValueError("The entity is not a user.")
-
-            input_bot_app = InputBotAppShortName(bot_id=bot_id, short_name="app")
-            web_view = await self.tg_client(messages.RequestAppWebViewRequest(peer=peer,
-                                                                              app=input_bot_app,
-                                                                              platform='android',
-                                                                              write_allowed=True,
-                                                                              start_param=self.start_param
-                                                                              ))
+            web_view = await self.tg_client(messages.RequestAppWebViewRequest(
+                peer=peer,
+                app=input_bot_app,
+                platform='android',
+                write_allowed=True,
+                start_param=self.start_param
+            ))
 
             auth_url = web_view.url
-            # print(auth_url)
             tg_web_data = unquote(
                 string=auth_url.split('tgWebAppData=', maxsplit=1)[1].split('&tgWebAppVersion', maxsplit=1)[0])
 
@@ -457,7 +431,7 @@ class Tapper:
         except Exception as e:
             self.error(f"Error occurred during claim: {e}")
 
-    async def start(self, http_client: aiohttp.ClientSession):
+    async def start_farming(self, http_client: aiohttp.ClientSession):
         try:
             resp = await http_client.post("https://game-domain.blum.codes/api/v1/farming/start", ssl=False)
 
@@ -470,18 +444,20 @@ class Tapper:
         try:
             while True:
                 resp = await http_client.get("https://user-domain.blum.codes/api/v1/friends/balance", ssl=False)
-                if resp.status not in [200, 201]:
-                    continue
-                else:
+                if resp.status in [200, 201]:
                     break
+
+                await asyncio.sleep(random.uniform(0.2, 1))
+
             resp_json = await resp.json()
             claim_amount = resp_json.get("amountForClaim")
             is_available = resp_json.get("canClaim")
 
-            return (claim_amount,
-                    is_available)
+            return claim_amount, is_available
+
         except Exception as e:
             self.error(f"Error occurred during friend balance: {e}")
+            return None, None
 
     async def friend_claim(self, http_client: aiohttp.ClientSession):
         try:
@@ -538,13 +514,14 @@ class Tapper:
 
         return resp_json.get('access'), resp_json.get('refresh')
 
-    async def check_proxy(self, http_client: aiohttp.ClientSession, proxy: Proxy) -> None:
+    async def check_proxy(self, http_client: aiohttp.ClientSession, proxy: str) -> None:
         try:
             response = await http_client.get(url='https://httpbin.org/ip', timeout=aiohttp.ClientTimeout(5))
             ip = (await response.json()).get('origin')
             logger.info(f"<light-yellow>{self.session_name}</light-yellow> | Proxy IP: {ip}")
         except Exception as error:
             logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Proxy: {proxy} | Error: {error}")
+            raise InvalidSession(f"{self.session_name}: Proxy: '{proxy} doesn't respond'")
 
     async def run(self, proxy: str | None) -> None:
         access_token = None
@@ -556,7 +533,8 @@ class Tapper:
         http_client = CloudflareScraper(headers=headers, connector=proxy_conn)
 
         if proxy:
-            await self.check_proxy(http_client=http_client, proxy=proxy)
+            await self.check_proxy(http_client=http_client,
+                                   proxy=f"{proxy_conn._proxy_type}://{proxy_conn._proxy_host}:{proxy_conn._proxy_port}")
 
         # print(init_data)
 
@@ -630,7 +608,7 @@ class Tapper:
                     timestamp, start_time, end_time, play_passes = await self.balance(http_client=http_client)
 
                     if start_time is None and end_time is None:
-                        await self.start(http_client=http_client)
+                        await self.start_farming(http_client=http_client)
                         self.info(f"<lc>[FARMING]</lc> Start farming!")
 
                     elif (start_time is not None and end_time is not None and timestamp is not None and
@@ -659,4 +637,5 @@ async def run_tapper(tg_client: TelegramClient, proxy: str | None):
     try:
         await Tapper(tg_client=tg_client).run(proxy=proxy)
     except InvalidSession:
-        logger.error(f"{tg_client.name} | Invalid Session")
+        session_name = tg_client.session.filename.split('/')[-1].replace(r'.session', '')
+        logger.error(f"{session_name} | Invalid Session")

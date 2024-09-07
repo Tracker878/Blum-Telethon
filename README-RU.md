@@ -17,7 +17,7 @@
 |            Привязка прокси к сессии            |       ✅        | 
 | Авто-регистрация аккаунта по вашей реф. ссылке |       ✅        |
 |     Авто игра с выбором рандомных поинтов      |       ✅        |
-|          Поддержка pyrogram .session           |       ✅        |
+|          Поддержка telethon .session           |       ✅        |
 
 
 ## [Настройки](https://github.com/HiddenCodeDevs/BlumTelegramBot/blob/main/.env-example/)

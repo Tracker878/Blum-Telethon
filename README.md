@@ -17,7 +17,7 @@
 |              Proxy binding to session              |     ✅     |
 | Auto-register your account with your referral link |     ✅     |
 |      Auto-game with a choice of random points      |     ✅     |
-|           Support for pyrogram .session            |     ✅     |
+|           Support for telethon .session            |     ✅     |
 
 
 ## [Settings](https://github.com/HiddenCodeDevs/BlumTelegramBot/blob/main/.env-example/)

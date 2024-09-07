@@ -1,6 +1,4 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from os.path import dirname, abspath
-import __main__ as main
 
 
 class Settings(BaseSettings):
@@ -17,7 +15,9 @@ class Settings(BaseSettings):
 
     USE_PROXY_FROM_FILE: bool = False
 
-    PROJECT_ROOT: str = dirname(abspath(main.__file__))
+    DEBUG_LOGGING: bool = False
+
+    DEVICE_PARAMS: bool = False
 
 
 settings = Settings()

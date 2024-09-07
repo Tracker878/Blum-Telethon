@@ -1,11 +1,11 @@
-from os import path, mkdir
 import glob
 import asyncio
 import argparse
+from os import path
+from shutil import copyfile
 from itertools import cycle
 
-from opentele.tl import TelegramClient
-from opentele.api import API
+from telethon import TelegramClient
 from better_proxy import Proxy
 
 from bot.config import settings
@@ -27,8 +27,6 @@ Select an action:
     2. Create session
 """
 
-global tg_clients
-
 
 def get_session_names() -> list[str]:
     session_names = sorted(glob.glob("sessions/*.session"))
@@ -40,9 +38,14 @@ def get_session_names() -> list[str]:
 
 
 def get_proxies() -> list[Proxy]:
+    proxy_template_path = "bot/config/proxies-template.txt"
+    proxy_path = "bot/config/proxies.txt"
+    if not path.isfile(proxy_path):
+        copyfile(proxy_template_path, proxy_path)
+        return []
     if settings.USE_PROXY_FROM_FILE:
-        with open(file="bot/config/proxies.txt", encoding="utf-8-sig") as file:
-            proxies = [Proxy.from_str(proxy=row.strip()).as_url for row in file]
+        with open(file=proxy_path, encoding="utf-8-sig") as file:
+            proxies = [Proxy.from_str(proxy=row.strip()).as_url for row in file if not row.startswith('type')]
     else:
         proxies = []
 
@@ -50,29 +53,27 @@ def get_proxies() -> list[Proxy]:
 
 
 async def get_tg_clients() -> list[TelegramClient]:
-    global tg_clients
+    API_ID = settings.API_ID
+    API_HASH = settings.API_HASH
 
     session_names = get_session_names()
 
     if not session_names:
         raise FileNotFoundError("Not found session files")
 
-    if not settings.API_ID or not settings.API_HASH:
+    if not API_ID or not API_HASH:
         raise ValueError("API_ID and API_HASH not found in the .env file.")
 
     tg_clients = [
         TelegramClient(
-            name=path.join(settings.PROJECT_ROOT, "sessions", session_name),
-            api_id=settings.API_ID,
-            api_hash=settings.API_HASH,
-        ) if settings.API_ID and settings.API_HASH else
-        TelegramClient(
-            name=path.join(settings.PROJECT_ROOT, "sessions", session_name),
-            api=API.TelegramAndroid.Generate(unique_id=session_name),
+            session=f"sessions/{session_name}",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            lang_code="en",
+            system_lang_code="en-US",
         )
         for session_name in session_names
     ]
-
     return tg_clients
 
 
