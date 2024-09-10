@@ -4,8 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 
-    API_ID: int | None = None
-    API_HASH: str | None = None
+    API_ID: int = None
+    API_HASH: str = None
 
     PLAY_GAMES: bool = True
     POINTS: list[int] = [190, 230]
@@ -15,9 +15,10 @@ class Settings(BaseSettings):
 
     USE_PROXY_FROM_FILE: bool = False
 
+    DEVICE_PARAMS: bool = False
+
     DEBUG_LOGGING: bool = False
 
-    DEVICE_PARAMS: bool = False
 
 
 settings = Settings()

@@ -514,14 +514,15 @@ class Tapper:
 
         return resp_json.get('access'), resp_json.get('refresh')
 
-    async def check_proxy(self, http_client: aiohttp.ClientSession, proxy: str) -> None:
+    async def check_proxy(self, http_client: aiohttp.ClientSession, proxy: str) -> bool:
         try:
             response = await http_client.get(url='https://httpbin.org/ip', timeout=aiohttp.ClientTimeout(5))
             ip = (await response.json()).get('origin')
             logger.info(f"<light-yellow>{self.session_name}</light-yellow> | Proxy IP: {ip}")
+            return True
         except Exception as error:
             logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Proxy: {proxy} | Error: {error}")
-            raise InvalidSession(f"{self.session_name}: Proxy: '{proxy} doesn't respond'")
+            return False
 
     async def run(self, proxy: str | None) -> None:
         access_token = None
@@ -533,8 +534,9 @@ class Tapper:
         http_client = CloudflareScraper(headers=headers, connector=proxy_conn)
 
         if proxy:
-            await self.check_proxy(http_client=http_client,
-                                   proxy=f"{proxy_conn._proxy_type}://{proxy_conn._proxy_host}:{proxy_conn._proxy_port}")
+            if not await self.check_proxy(http_client=http_client,
+                                   proxy=f"{proxy_conn._proxy_type}://{proxy_conn._proxy_host}:{proxy_conn._proxy_port}"):
+                return
 
         # print(init_data)
 
