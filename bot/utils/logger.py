@@ -4,9 +4,11 @@ from bot.config import settings
 from datetime import date
 
 logger.remove()
+
 logger.add(sink=sys.stdout, format="<white>{time:YYYY-MM-DD HH:mm:ss}</white>"
                                    " | <level>{level}</level>"
                                    " | <white><b>{message}</b></white>")
+
 logger = logger.opt(colors=True)
 
 if settings.DEBUG_LOGGING:

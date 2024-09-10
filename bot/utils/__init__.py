@@ -1,7 +1,7 @@
 from .logger import logger, info, warning, debug, success, error, critical
 from . import launcher
 
-from os import path, mkdir
+import os
 
-if not path.exists(path="sessions"):
-    mkdir(path="sessions")
+if not os.path.exists(path="sessions"):
+    os.mkdir(path="sessions")

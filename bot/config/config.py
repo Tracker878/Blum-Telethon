@@ -20,7 +20,4 @@ class Settings(BaseSettings):
     DEBUG_LOGGING: bool = False
 
 
-
 settings = Settings()
-
-

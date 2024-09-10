@@ -1,4 +1,5 @@
 import json
+from bot.utils import logger
 
 
 def read_or_create_config_file(relative_path: str) -> dict:
@@ -31,5 +32,8 @@ def write_config_file(relative_path: str, content: dict):
      Returns:
        The contents of the file, or an empty dict if the file was  empty or created.
      """
-    with open(relative_path, 'w+') as f:
-        f.write(json.dumps(content, indent=2))
+    try:
+        with open(relative_path, 'w+') as f:
+            json.dump(content, f, indent=2)
+    except IOError as e:
+        logger.error(f"An error occurred while writing to {relative_path}: {e}")

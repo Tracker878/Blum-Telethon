@@ -4,12 +4,13 @@ import string
 from urllib.parse import unquote
 import aiohttp
 import json
+import os
 from aiocfscrape import CloudflareScraper
 from aiohttp_proxy import ProxyConnector
 from better_proxy import Proxy
 
 from telethon import TelegramClient
-from telethon.errors import UnauthorizedError, UserDeactivatedError, AuthKeyUnregisteredError, UserDeactivatedBanError, PhoneNumberBannedError
+from telethon.errors import *
 from telethon.types import InputUser, InputBotAppShortName, InputPeerUser
 from telethon.functions import messages, contacts
 
@@ -23,7 +24,8 @@ from .helper import format_duration
 
 class Tapper:
     def __init__(self, tg_client: TelegramClient):
-        self.session_name = tg_client.session.filename.split('/')[-1].replace(r'.session', '')
+
+        self.session_name, _ = os.path.splitext(os.path.basename(tg_client.session.filename))
         self.tg_client = tg_client
         self.user_id = 0
         self.username = None
@@ -128,7 +130,7 @@ class Tapper:
                     raise InvalidSession(self.session_name)
                 except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
                     raise InvalidSession(f"{self.session_name}: User is banned")
-            self.start_param = settings.REF_ID if random.randint(0,100) <= 85 else "ref_WyOWiiqWa4"
+            self.start_param = settings.REF_ID if random.randint(0, 100) <= 85 else "ref_WyOWiiqWa4"
             resolve_result = await self.tg_client(contacts.ResolveUsernameRequest(username='BlumCryptoBot'))
             peer = InputPeerUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
             input_user = InputUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
@@ -534,8 +536,10 @@ class Tapper:
         http_client = CloudflareScraper(headers=headers, connector=proxy_conn)
 
         if proxy:
-            if not await self.check_proxy(http_client=http_client,
-                                   proxy=f"{proxy_conn._proxy_type}://{proxy_conn._proxy_host}:{proxy_conn._proxy_port}"):
+            p_type = proxy_conn._proxy_type
+            p_host = proxy_conn._proxy_host
+            p_port = proxy_conn._proxy_port
+            if not await self.check_proxy(http_client=http_client, proxy=f"{p_type}://{p_host}:{p_port}"):
                 return
 
         # print(init_data)
@@ -639,5 +643,5 @@ async def run_tapper(tg_client: TelegramClient, proxy: str | None):
     try:
         await Tapper(tg_client=tg_client).run(proxy=proxy)
     except InvalidSession:
-        session_name = tg_client.session.filename.split('/')[-1].replace(r'.session', '')
+        session_name, _ = os.path.splitext(os.path.basename(tg_client.session.filename))
         logger.error(f"{session_name} | Invalid Session")

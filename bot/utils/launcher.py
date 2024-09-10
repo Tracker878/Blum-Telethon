@@ -1,8 +1,7 @@
 import glob
 import asyncio
 import argparse
-from os import path
-from itertools import cycle
+import os
 
 from telethon import TelegramClient
 
@@ -18,7 +17,7 @@ start_text = """
 ██╔══██╗██║     ██║   ██║██║╚██╔╝██║   ██║   ██║   ██║██╔══██╗██║   ██║   ██║   
 ██████╔╝███████╗╚██████╔╝██║ ╚═╝ ██║   ██║   ╚██████╔╝██████╔╝╚██████╔╝   ██║   
 ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝     ╚═╝   ╚═╝    ╚═════╝ ╚═════╝  ╚═════╝    ╚═╝   
-                                                                                
+
 Select an action:
 
     1. Run clicker
@@ -28,11 +27,7 @@ Select an action:
 
 def get_session_names() -> list[str]:
     session_names = sorted(glob.glob("sessions/*.session"))
-    session_names = [
-        path.splitext(path.basename(file))[0] for file in session_names
-    ]
-
-    return session_names
+    return [os.path.splitext(os.path.basename(file))[0] for file in session_names]
 
 
 async def get_tg_clients() -> list[list[TelegramClient, str]]:
@@ -40,7 +35,6 @@ async def get_tg_clients() -> list[list[TelegramClient, str]]:
     API_HASH = settings.API_HASH
 
     accounts_config_path = 'bot/config/accounts_config.json'
-
     accounts_config = config_utils.read_or_create_config_file(accounts_config_path)
     session_names = get_session_names()
 
@@ -59,32 +53,33 @@ async def get_tg_clients() -> list[list[TelegramClient, str]]:
                 "lang_code": "en",
                 "system_lang_code": "en-US"
             }
-            for key in ("api_id", "api_hash", "device_model", "system_version", "app_version", 'proxy'):
+            for key in ("api_id", "api_hash", "device_model", "system_version", "app_version"):
                 if key in config and config[key]:
                     client_params[key] = config[key]
 
             tg_clients.append([TelegramClient(**client_params), config.get('proxy', None)])
         else:
-            unused_prox = proxy_utils.get_unused_proxies(accounts_config)
-            if len(unused_prox):
-                proxy = unused_prox[0]
+            unused_proxies = proxy_utils.get_unused_proxies(accounts_config)
+
+            if unused_proxies:
+                proxy = unused_proxies[0]
             else:
-                print(f'No proxy found for session: {session_name.replace(".session", "")}. Skipping')
+                print(f'No proxy found for session: {session_name}. Skipping')
                 continue
+
             tg_clients.append([TelegramClient(
                 session=f"sessions/{session_name}",
                 api_id=API_ID,
                 api_hash=API_HASH,
             ), proxy])
-            accounts_config.update(
-                {
-                    f'{session_name.replace(".session", "")}':
-                        {
-                            'api_id': API_ID,
-                            'api_hash': API_HASH,
-                            'proxy': proxy
-                        }
-                })
+            accounts_config.update({
+                session_name:
+                    {
+                        'api_id': API_ID,
+                        'api_hash': API_HASH,
+                        'proxy': proxy
+                    }
+            })
             config_utils.write_config_file(accounts_config_path, accounts_config)
     return tg_clients
 
@@ -119,8 +114,6 @@ async def process() -> None:
 
 
 async def run_tasks():
-    # proxies = proxy_utils.get_proxies()
-    # proxies_cycle = cycle(proxies) if proxies else None
     tg_clients = await get_tg_clients()
     tasks = [
         asyncio.create_task(
