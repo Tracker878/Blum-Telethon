@@ -1,10 +1,9 @@
+import aiohttp
 import asyncio
+import os
 import random
 import string
 from urllib.parse import unquote
-import aiohttp
-import json
-import os
 from aiocfscrape import CloudflareScraper
 from aiohttp_proxy import ProxyConnector
 from better_proxy import Proxy
@@ -15,17 +14,19 @@ from telethon.types import InputUser, InputBotAppShortName, InputPeerUser
 from telethon.functions import messages, contacts
 
 from .agents import generate_random_user_agent
-from bot.config import settings
-from bot.utils import logger, proxy_utils
-from bot.exceptions import InvalidSession
-from .headers import headers
+from .headers import *
 from .helper import format_duration
+from bot.config import settings
+from bot.utils import logger, proxy_utils, config_utils
+from bot.exceptions import InvalidSession
 
 
 class Tapper:
     def __init__(self, tg_client: TelegramClient):
 
         self.session_name, _ = os.path.splitext(os.path.basename(tg_client.session.filename))
+        self.config = config_utils.get_session_config(self.session_name)
+        self.proxy = self.config.get('proxy', None)
         self.tg_client = tg_client
         self.user_id = 0
         self.username = None
@@ -35,10 +36,9 @@ class Tapper:
         self.start_param = None
         self.peer = None
         self.first_run = None
-
-        self.session_ug_dict = self.load_user_agents() or []
-
-        headers['User-Agent'] = self.check_user_agent()
+        self.headers = headers
+        self.headers['User-Agent'] = self.check_user_agent()
+        self.headers.update(**get_sec_ch_ua(self.headers.get('User-Agent', '')))
 
     @staticmethod
     async def generate_random_user_agent():
@@ -68,62 +68,25 @@ class Tapper:
         from bot.utils import success
         success(f"<light-yellow>{self.session_name}</light-yellow> | {message}")
 
-    def save_user_agent(self):
-        user_agents_file_name = "user_agents.json"
-
-        if not any(session['session_name'] == self.session_name for session in self.session_ug_dict):
-            user_agent_str = generate_random_user_agent()
-
-            self.session_ug_dict.append({
-                'session_name': self.session_name,
-                'user_agent': user_agent_str})
-
-            with open(user_agents_file_name, 'w') as user_agents:
-                json.dump(self.session_ug_dict, user_agents, indent=4)
-
-            logger.success(f"<light-yellow>{self.session_name}</light-yellow> | User agent saved successfully")
-
-            return user_agent_str
-
-    @staticmethod
-    def load_user_agents():
-        user_agents_file_name = "user_agents.json"
-
-        try:
-            with open(user_agents_file_name, 'r') as user_agents:
-                session_data = json.load(user_agents)
-                if isinstance(session_data, list):
-                    return session_data
-
-        except FileNotFoundError:
-            logger.warning("User agents file not found, creating...")
-
-        except json.JSONDecodeError:
-            logger.warning("User agents file is empty or corrupted.")
-
-        return []
-
     def check_user_agent(self):
-        load = next(
-            (session['user_agent'] for session in self.session_ug_dict if session['session_name'] == self.session_name),
-            None)
+        user_agent = self.config.get('user_agent')
+        if not user_agent:
+            user_agent = generate_random_user_agent()
+            self.config['user_agent'] = user_agent
+            config_utils.update_config_file(self.session_name, self.config)
 
-        if load is None:
-            return self.save_user_agent()
+        return user_agent
 
-        return load
-
-    async def get_tg_web_data(self, proxy: str | None) -> str:
-        if proxy:
-            proxy = Proxy.from_str(proxy)
+    async def get_tg_web_data(self) -> str:
+        if self.proxy:
+            proxy = Proxy.from_str(self.proxy)
             proxy_dict = proxy_utils.to_telethon_proxy(proxy)
         else:
             proxy_dict = None
+
         self.tg_client.set_proxy(proxy_dict)
         try:
-            with_tg = True
             if not self.tg_client.is_connected():
-                with_tg = False
                 try:
                     await self.tg_client.start()
                 except (UnauthorizedError, AuthKeyUnregisteredError):
@@ -131,8 +94,18 @@ class Tapper:
                 except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
                     raise InvalidSession(f"{self.session_name}: User is banned")
             self.start_param = settings.REF_ID if random.randint(0, 100) <= 85 else "ref_WyOWiiqWa4"
-            resolve_result = await self.tg_client(contacts.ResolveUsernameRequest(username='BlumCryptoBot'))
-            peer = InputPeerUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
+            while True:
+                try:
+                    resolve_result = await self.tg_client(contacts.ResolveUsernameRequest(username='BlumCryptoBot'))
+                    peer = InputPeerUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
+                    break
+                except FloodWaitError as fl:
+                    fls = fl.seconds
+
+                    logger.warning(f"{self.session_name} | FloodWait {fl}")
+                    logger.info(f"{self.session_name} | Sleep {fls}s")
+                    await asyncio.sleep(fls + 3)
+
             input_user = InputUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
             input_bot_app = InputBotAppShortName(bot_id=input_user, short_name="app")
 
@@ -158,7 +131,7 @@ class Tapper:
             except Exception as e:
                 print(e)
 
-            if with_tg is False:
+            if self.tg_client.is_connected():
                 await self.tg_client.disconnect()
 
             return tg_web_data
@@ -167,8 +140,7 @@ class Tapper:
             raise error
 
         except Exception as error:
-            logger.error(
-                f"<light-yellow>{self.session_name}</light-yellow> | Unknown error during Authorization: {error}")
+            self.error(f"Unknown error during Authorization: {error}")
             await asyncio.sleep(delay=3)
 
     async def login(self, http_client: aiohttp.ClientSession, initdata):
@@ -268,26 +240,26 @@ class Tapper:
                         return resp_json.get("token").get("access"), resp_json.get("token").get("refresh")
 
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Login error {error}")
+            self.error(f"Login error {error}")
             return None, None
 
     async def claim_task(self, http_client: aiohttp.ClientSession, task_id):
         try:
-            resp = await http_client.post(f'https://game-domain.blum.codes/api/v1/tasks/{task_id}/claim',
+            resp = await http_client.post(f'https://earn-domain.blum.codes/api/v1/tasks/{task_id}/claim',
                                           ssl=False)
             resp_json = await resp.json()
 
             return resp_json.get('status') == "FINISHED"
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Claim task error {error}")
+            self.error(f"Claim task error {error}")
 
     async def start_task(self, http_client: aiohttp.ClientSession, task_id):
         try:
-            resp = await http_client.post(f'https://game-domain.blum.codes/api/v1/tasks/{task_id}/start',
+            resp = await http_client.post(f'https://earn-domain.blum.codes/api/v1/tasks/{task_id}/start',
                                           ssl=False)
 
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Start complete error {error}")
+            self.error(f" Start complete error {error}")
 
     async def validate_task(self, http_client: aiohttp.ClientSession, task_id, title):
         try:
@@ -297,7 +269,7 @@ class Tapper:
 
             payload = {'keyword': keywords.get(title)}
 
-            resp = await http_client.post(f'https://game-domain.blum.codes/api/v1/tasks/{task_id}/validate',
+            resp = await http_client.post(f'https://earn-domain.blum.codes/api/v1/tasks/{task_id}/validate',
                                           json=payload, ssl=False)
             resp_json = await resp.json()
             if resp_json.get('status') == "READY_FOR_CLAIM":
@@ -309,7 +281,7 @@ class Tapper:
                 return False
 
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Claim task error {error}")
+            self.error(f"Claim task error {error}")
 
     async def join_tribe(self, http_client: aiohttp.ClientSession):
         try:
@@ -320,28 +292,29 @@ class Tapper:
             if text == 'OK':
                 self.success(f'Joined tribe')
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Join tribe {error}")
+            self.error(f"Join tribe {error}")
 
     async def get_tasks(self, http_client: aiohttp.ClientSession):
         try:
             while True:
-                resp = await http_client.get('https://game-domain.blum.codes/api/v1/tasks', ssl=False)
+                resp = await http_client.get('https://earn-domain.blum.codes/api/v1/tasks', ssl=False)
                 if resp.status not in [200, 201]:
+                    await asyncio.sleep(random.uniform(3, 5))
                     continue
                 else:
                     break
             resp_json = await resp.json()
 
-            # logger.debug(f"{self.session_name} | get_tasks response: {resp_json}")
+            # self.debug(f"get_tasks response: {resp_json}")
             tasks = [element for sublist in resp_json for element in sublist.get("subSections")]
 
             if isinstance(resp_json, list):
                 return tasks
             else:
-                logger.error(f"{self.session_name} | Unexpected response format in get_tasks: {resp_json}")
+                self.error(f"Unexpected response format in get_tasks: {resp_json}")
                 return []
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Get tasks error {error}")
+            self.error(f"Get tasks error {error}")
 
     async def play_game(self, http_client: aiohttp.ClientSession, play_passes, refresh_token):
         try:
@@ -351,8 +324,7 @@ class Tapper:
                 game_id = await self.start_game(http_client=http_client)
 
                 if not game_id or game_id == "cannot start game":
-                    logger.info(f"<light-yellow>{self.session_name}</light-yellow> | Couldn't start play in game!"
-                                f" play_passes: {play_passes}, trying again")
+                    self.info(f"Couldn't start play in game! play_passes: {play_passes}, trying again")
                     tries -= 1
                     if tries == 0:
                         self.warning('No more trying, gonna skip games')
@@ -391,7 +363,7 @@ class Tapper:
 
                 play_passes -= 1
         except Exception as e:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Error occurred during play game: {e}")
+            self.error(f"Error occurred during play game: {e}")
 
     async def start_game(self, http_client: aiohttp.ClientSession):
         try:
@@ -520,27 +492,27 @@ class Tapper:
         try:
             response = await http_client.get(url='https://httpbin.org/ip', timeout=aiohttp.ClientTimeout(5))
             ip = (await response.json()).get('origin')
-            logger.info(f"<light-yellow>{self.session_name}</light-yellow> | Proxy IP: {ip}")
+            self.info(f"Proxy IP: {ip}")
             return True
         except Exception as error:
-            logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Proxy: {proxy} | Error: {error}")
+            self.error(f"Proxy: {proxy} | Error: {error}")
             return False
 
-    async def run(self, proxy: str | None) -> None:
+    async def run(self) -> None:
         access_token = None
         refresh_token = None
         login_need = True
 
-        proxy_conn = ProxyConnector().from_url(proxy) if proxy else None
-
-        http_client = CloudflareScraper(headers=headers, connector=proxy_conn)
-
-        if proxy:
+        if self.proxy:
+            proxy_conn = ProxyConnector().from_url(self.proxy)
+            http_client = CloudflareScraper(headers=self.headers, connector=proxy_conn)
             p_type = proxy_conn._proxy_type
             p_host = proxy_conn._proxy_host
             p_port = proxy_conn._proxy_port
             if not await self.check_proxy(http_client=http_client, proxy=f"{p_type}://{p_host}:{p_port}"):
                 return
+        else:
+            http_client = CloudflareScraper(headers=self.headers)
 
         # print(init_data)
 
@@ -550,7 +522,7 @@ class Tapper:
                     if "Authorization" in http_client.headers:
                         del http_client.headers["Authorization"]
 
-                    init_data = await self.get_tg_web_data(proxy=proxy)
+                    init_data = await self.get_tg_web_data()
 
                     access_token, refresh_token = await self.login(http_client=http_client, initdata=init_data)
 
@@ -564,26 +536,22 @@ class Tapper:
 
                 msg = await self.claim_daily_reward(http_client=http_client)
                 if isinstance(msg, bool) and msg:
-                    logger.success(f"<light-yellow>{self.session_name}</light-yellow> | Claimed daily reward!")
+                    self.success(f"Claimed daily reward!")
 
                 timestamp, start_time, end_time, play_passes = await self.balance(http_client=http_client)
-
                 if isinstance(play_passes, int):
                     self.info(f'You have {play_passes} play passes')
 
                 claim_amount, is_available = await self.friend_balance(http_client=http_client)
-
                 if claim_amount != 0 and is_available:
                     amount = await self.friend_claim(http_client=http_client)
                     self.success(f"Claimed friend ref reward {amount}")
 
-                if play_passes and play_passes > 0 and settings.PLAY_GAMES is True:
+                if play_passes and play_passes > 0 and settings.PLAY_GAMES:
                     await self.play_game(http_client=http_client, play_passes=play_passes, refresh_token=refresh_token)
 
                 # await self.join_tribe(http_client=http_client)
-
                 tasks = await self.get_tasks(http_client=http_client)
-
                 for section in tasks:
                     for task in section['tasks']:
                         if task.get('status') == "NOT_STARTED" and task.get('type') != "PROGRESS_TARGET":
@@ -597,16 +565,14 @@ class Tapper:
                             if task['status'] == "READY_FOR_CLAIM":
                                 status = await self.claim_task(http_client=http_client, task_id=task["id"])
                                 if status:
-                                    logger.success(f"<light-yellow>{self.session_name}</light-yellow> | Claimed task - "
-                                                   f"'{task['title']}'")
+                                    self.success(f"Claimed task - '{task['title']}'")
                                 await asyncio.sleep(random.uniform(3, 5))
                             elif task['status'] == "READY_FOR_VERIFY" and task['validationType'] == 'KEYWORD':
                                 status = await self.validate_task(http_client=http_client, task_id=task["id"],
                                                                   title=task['title'])
 
                                 if status:
-                                    logger.success(f"<light-yellow>{self.session_name}</light-yellow> | Claimed task - "
-                                                   f"'{task['title']}'")
+                                    self.success(f"Claimed task - '{task['title']}'")
 
                 # await asyncio.sleep(random.uniform(1, 3))
 
@@ -635,13 +601,13 @@ class Tapper:
                 raise error
 
             except Exception as error:
-                logger.error(f"<light-yellow>{self.session_name}</light-yellow> | Unknown error: {error}")
+                self.error(f"Unknown error: {error}")
                 await asyncio.sleep(delay=3)
 
 
-async def run_tapper(tg_client: TelegramClient, proxy: str | None):
+async def run_tapper(tg_client: TelegramClient):
     try:
-        await Tapper(tg_client=tg_client).run(proxy=proxy)
+        await Tapper(tg_client=tg_client).run()
     except InvalidSession:
         session_name, _ = os.path.splitext(os.path.basename(tg_client.session.filename))
-        logger.error(f"{session_name} | Invalid Session")
+        logger.error(f"<light-yellow>{session_name}</light-yellow> | Invalid Session")
