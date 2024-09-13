@@ -525,6 +525,7 @@ class Tapper:
 
         while True:
             try:
+                play_passes = None
                 if login_need:
                     if "Authorization" in http_client.headers:
                         del http_client.headers["Authorization"]
