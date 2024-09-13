@@ -32,9 +32,7 @@ class Tapper:
         self.username = None
         self.first_name = None
         self.last_name = None
-        self.fullname = None
         self.start_param = None
-        self.peer = None
         self.first_run = None
         self.headers = headers
         self.headers['User-Agent'] = self.check_user_agent()
@@ -488,8 +486,7 @@ class Tapper:
         except Exception as e:
             self.error(f"Error occurred during claim daily reward: {e}")
 
-    @staticmethod
-    async def refresh_token(http_client: aiohttp.ClientSession, token):
+    async def refresh_token(self, http_client: aiohttp.ClientSession, token):
         if "Authorization" in http_client.headers:
             del http_client.headers["Authorization"]
         json_data = {'refresh': token}
