@@ -21,18 +21,18 @@
 
 
 ## [Settings](https://github.com/HiddenCodeDevs/BlumTelegramBot/blob/main/.env-example/)
-|        Settings         |                                        Description                                         |
-|:-----------------------:|:------------------------------------------------------------------------------------------:|
-|  **API_ID / API_HASH**  |          Platform data from which to run the Telegram session (default - android)          |
-|     **PLAY_GAMES**      |                     Play games or just start farming (default is True)                     |
-|       **POINTS**        |               Points per game (default is [190, 230] ((That is, 190 to 230)                |
-| **USE_RANDOM_DELAY_IN_RUN** |                                  Name says it all                                   |
+|          Settings           |                                        Description                                         |
+|:---------------------------:|:------------------------------------------------------------------------------------------:|
+|    **API_ID / API_HASH**    |          Platform data from which to run the Telegram session (default - android)          |
+|       **PLAY_GAMES**        |                     Play games or just start farming (default is True)                     |
+|         **POINTS**          |               Points per game (default is [190, 230] ((That is, 190 to 230)                |
+| **USE_RANDOM_DELAY_IN_RUN** |                                      Name says it all                                      |
 |   **RANDOM_DELAY_IN_RUN**   |                      Random seconds delay for ^^^ (default is [5, 30]                      |
-|       **USE_REF**       |                Register accounts with ur referral or not (default - False)                 |
-|       **REF_ID**        |          Your referral argument (comes after app/startapp? in your referral link)          |
-| **USE_PROXY_FROM_FILE** |        Whether to use a proxy from the `bot/config/proxies.txt` file (True / False)        |
-|    **DEVICE_PARAMS**    | Enter device settings to make the telegram session look more realistic  (True / **False**) |
-|    **DEBUG_LOGGING**    |            Whether to log error's tracebacks to /logs folder (True / **False**)            |
+|         **USE_REF**         |                Register accounts with ur referral or not (default - False)                 |
+|         **REF_ID**          |          Your referral argument (comes after app/startapp? in your referral link)          |
+|   **USE_PROXY_FROM_FILE**   |        Whether to use a proxy from the `bot/config/proxies.txt` file (True / False)        |
+|      **DEVICE_PARAMS**      | Enter device settings to make the telegram session look more realistic  (True / **False**) |
+|      **DEBUG_LOGGING**      |            Whether to log error's tracebacks to /logs folder (True / **False**)            |
 
 ## Quick Start 📚
 
