@@ -107,8 +107,8 @@ class Tapper:
                 except FloodWaitError as fl:
                     fls = fl.seconds
 
-                    logger.warning(f"{self.session_name} | FloodWait {fl}")
-                    logger.info(f"{self.session_name} | Sleep {fls}s")
+                    self.warning(f"{self.session_name} | FloodWait {fl}")
+                    self.info(f"{self.session_name} | Sleep {fls}s")
                     await asyncio.sleep(fls + 3)
 
             input_user = InputUser(user_id=resolve_result.peer.user_id, access_hash=resolve_result.users[0].access_hash)
@@ -289,7 +289,7 @@ class Tapper:
 
     async def join_tribe(self, http_client: aiohttp.ClientSession):
         try:
-            resp = await http_client.post(f'{self.tribe_url}/api/v1/tribe/510c4987-ff99-4bd4-9e74-29ba9bce8220/join',
+            resp = await http_client.post(f'{self.tribe_url}/api/v1/tribe/6361f86f-6a55-4b6b-b2bd-f73e79e09e38/join',
                                           ssl=False)
             text = await resp.text()
             if text == 'OK':
@@ -355,11 +355,9 @@ class Tapper:
 
                 msg, points = await self.claim_game(game_id=game_id, http_client=http_client)
                 if isinstance(msg, bool) and msg:
-                    logger.info(f"<light-yellow>{self.session_name}</light-yellow> | Finish play in game!"
-                                f" reward: {points}")
+                    self.info(f"Finish play in game! reward: {points}")
                 else:
-                    logger.info(f"<light-yellow>{self.session_name}</light-yellow> | Couldn't play game,"
-                                f" msg: {msg} play_passes: {play_passes}")
+                    self.info(f"Couldn't play game, msg: {msg} play_passes: {play_passes}")
                     break
 
                 await asyncio.sleep(random.uniform(1, 5))
@@ -559,7 +557,7 @@ class Tapper:
                 if play_passes and play_passes > 0 and settings.PLAY_GAMES:
                     await self.play_game(http_client=http_client, play_passes=play_passes, refresh_token=refresh_token)
 
-                # await self.join_tribe(http_client=http_client)
+                await self.join_tribe(http_client=http_client)
                 tasks = await self.get_tasks(http_client=http_client)
                 for section in tasks:
                     for task in section['tasks']:
