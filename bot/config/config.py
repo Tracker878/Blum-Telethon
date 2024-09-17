@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     API_ID: int = None
     API_HASH: str = None
+    GLOBAL_CONFIG_PATH: str = "TG_FARM"
 
     PLAY_GAMES: bool = True
     POINTS: list[int] = [190, 230]
